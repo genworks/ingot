@@ -29,9 +29,16 @@ at START in OCTETS, and the index just past that stream."
         (git-error "A compressed object of ~d bytes inflated to ~d." expected-size produced))
       (values out (+ start consumed)))))
 
+(defparameter *empty-zlib-stream* (octets #x78 #x9c #x03 #x00 #x00 #x00 #x00 #x01)
+  "The zlib stream of no bytes at all: salza2 answers a truncated one for
+empty input, which neither zlib nor chipz accept, and a pack holding the
+empty blob was unreadable (found on gendl, 2026-10-08).")
+
 (defun deflate (octets)
   "OCTETS as a zlib stream."
-  (salza2:compress-data octets 'salza2:zlib-compressor))
+  (if (zerop (length octets))
+      (copy-seq *empty-zlib-stream*)
+      (salza2:compress-data octets 'salza2:zlib-compressor)))
 
 (defun gzip (octets)
   "OCTETS as a gzip file."

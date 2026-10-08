@@ -18,12 +18,17 @@
 ;;   the small objects that are asked for again and again.
 ;;
 ;; - A pack arriving from a client (a push), in memory and without an
-;;   index: `index-pack' walks it entry by entry, finding where each zlib
-;;   stream ends, resolves every delta (a thin pack's bases come from
-;;   the repository) and answers the objects, which `store-pack!' writes
-;;   loose.  Nothing is kept packed from a push; `git gc' on the server
-;;   is not a thing here, and the loose objects are what every reader
-;;   understands.
+;;   index: `parse-pack-entries' walks it entry by entry, finding where
+;;   each zlib stream ends, and `resolve-pack-entries' applies every
+;;   delta (a thin pack's bases come from the repository) so that each
+;;   entry has its id.  `store-pack!' (packwriter.lisp) then keeps the
+;;   pack as it came, with an index written here, or writes the objects
+;;   loose.
+;;
+;; And one way out: `copy-pack-entries' copies entries of a pack on disk
+;; into a pack being written, compressed as they lie, deltas included
+;; when the base goes too; that is how a fetch answers with a pack the
+;; size of the one that was pushed.
 ;;
 
 (defconstant +obj-commit+ 1)
@@ -48,7 +53,9 @@
   names                                 ; octets, 20 per object, sorted
   offsets                               ; 32-bit offsets, 4 per object
   large-offsets                         ; 64-bit offsets table, or nil
-  mtime)
+  mtime
+  ends                                  ; offset -> where that entry ends; filled on first use
+  oids-by-offset)                       ; offset -> id; the same
 
 (defun read-pack-index (idx-file pack-file)
   (let ((octets (read-file-octets idx-file)))
@@ -210,7 +217,7 @@ there: chipz inflates from a vector where it balks at a file stream."
 ;;; A pack in memory, without an index: a push
 
 (defstruct raw-entry
-  offset type size data base-offset base-oid oid object)
+  offset end type size data base-offset base-oid oid object)
 
 (defun parse-pack-entries (pack)
   "The entries of PACK (octets: header, entries, checksum), each with its
@@ -242,46 +249,184 @@ inflated bytes (a delta's bytes for a delta), in pack order."
                    (incf at 20))
                   (t (setf (raw-entry-type entry) (pack-type-keyword type))))
             (multiple-value-bind (data next) (inflate-at pack at size)
-              (setf (raw-entry-data entry) data)
+              (setf (raw-entry-data entry) data
+                    (raw-entry-end entry) next)
               (setq at next))
             (push entry entries)))))
     (nreverse entries)))
+
+(defun resolve-pack-entries (entries find-by-oid)
+  "ENTRIES (from `parse-pack-entries') with their objects and ids: every
+delta applied to its base, a base the pack lacks taken from FIND-BY-OID
+(a thin pack).  Values: the entries, and the ids of the bases that came
+from outside the pack."
+  (let ((by-offset (make-hash-table))
+        (by-oid (make-hash-table :test #'equal))
+        (outside nil))
+    (dolist (entry entries) (setf (gethash (raw-entry-offset entry) by-offset) entry))
+    (labels ((settle (entry object)
+               (setf (raw-entry-object entry) object
+                     (raw-entry-oid entry) (object-oid object)
+                     (gethash (object-oid object) by-oid) entry)
+               object)
+             (delta-of (entry base-object)
+               (settle entry (make-git-object (object-type base-object)
+                                              (apply-delta (object-data base-object) (raw-entry-data entry)))))
+             (resolve (entry depth final?)
+               ;; the entry's object, or nil when a base of its chain is
+               ;; not known yet (a ref-delta whose base comes later); with
+               ;; FINAL? such a base is asked of the repository instead
+               (when (> depth 1000) (git-error "A delta chain too deep."))
+               (or (raw-entry-object entry)
+                   (ecase (raw-entry-type entry)
+                     (:ofs-delta
+                      (let ((base (gethash (raw-entry-base-offset entry) by-offset)))
+                        (unless base (git-error "A delta names an offset outside the pack."))
+                        (let ((base-object (resolve base (1+ depth) final?)))
+                          (and base-object (delta-of entry base-object)))))
+                     (:ref-delta
+                      (let* ((oid (raw-entry-base-oid entry))
+                             (in-pack (gethash oid by-oid))
+                             (base-object (cond (in-pack (resolve in-pack (1+ depth) final?))
+                                                (final? (let ((found (funcall find-by-oid oid)))
+                                                          (when found (pushnew oid outside :test #'string=))
+                                                          found))
+                                                (t nil))))
+                        (cond (base-object (delta-of entry base-object))
+                              (final? (git-error "A delta's base ~a is not in the pack nor here." oid))
+                              (t nil))))
+                     ((:commit :tree :blob :tag)
+                      (settle entry (make-git-object (raw-entry-type entry) (raw-entry-data entry))))))))
+      ;; passes over what is left until nothing moves; only then are
+      ;; bases asked of the repository
+      (let ((pending entries) (final? nil))
+        (loop while pending
+              do (let ((before (length pending)))
+                   (setq pending (remove-if (lambda (entry) (resolve entry 0 final?)) pending))
+                   (when (= (length pending) before)
+                     (setq final? t)))))
+      (values entries (nreverse outside)))))
 
 (defun index-pack (pack find-by-oid)
   "The git-objects in PACK (octets), every delta resolved; FIND-BY-OID
 answers an object the repository already has, for a thin pack.  Answers
 the list of objects in pack order."
-  (let* ((entries (parse-pack-entries pack))
-         (by-offset (make-hash-table))
-         (by-oid (make-hash-table :test #'equal)))
-    (dolist (entry entries) (setf (gethash (raw-entry-offset entry) by-offset) entry))
-    (labels ((resolve (entry depth)
-               (when (> depth 1000) (git-error "A delta chain too deep."))
-               (or (raw-entry-object entry)
-                   (let ((object
-                           (case (raw-entry-type entry)
-                             (:ofs-delta
-                              (let ((base (gethash (raw-entry-base-offset entry) by-offset)))
-                                (unless base (git-error "A delta names an offset outside the pack."))
-                                (let ((base-object (resolve base (1+ depth))))
-                                  (make-git-object (object-type base-object)
-                                                   (apply-delta (object-data base-object) (raw-entry-data entry))))))
-                             (:ref-delta
-                              (let* ((oid (raw-entry-base-oid entry))
-                                     (in-pack (gethash oid by-oid))
-                                     (base-object (if in-pack
-                                                      (resolve in-pack (1+ depth))
-                                                      (funcall find-by-oid oid))))
-                                (unless base-object (git-error "A delta's base ~a is not in the pack nor here." oid))
-                                (make-git-object (object-type base-object)
-                                                 (apply-delta (object-data base-object) (raw-entry-data entry)))))
-                             (t (make-git-object (raw-entry-type entry) (raw-entry-data entry))))))
-                     (setf (raw-entry-object entry) object
-                           (raw-entry-oid entry) (object-oid object)
-                           (gethash (object-oid object) by-oid) entry)
-                     object))))
-      ;; the plain objects first, so that ref-deltas find their bases by id
-      (dolist (entry entries)
-        (unless (member (raw-entry-type entry) '(:ofs-delta :ref-delta))
-          (resolve entry 0)))
-      (mapcar (lambda (entry) (resolve entry 0)) entries))))
+  (mapcar #'raw-entry-object (resolve-pack-entries (parse-pack-entries pack) find-by-oid)))
+
+;;; Writing entries, and a pack's index
+
+(defun write-raw-entry-header (buffer type-number size)
+  "A pack entry's header: the type in three bits and the size, base 128."
+  (let ((byte (logior (ash type-number 4) (ldb (byte 4 0) size)))
+        (rest (ash size -4)))
+    (loop
+      (if (zerop rest)
+          (progn (buffer-byte buffer byte) (return))
+          (progn (buffer-byte buffer (logior byte #x80))
+                 (setq byte (ldb (byte 7 0) rest)
+                       rest (ash rest -7)))))))
+
+(defun write-ofs-delta-distance (buffer distance)
+  "DISTANCE (bytes back to the base) as git encodes it: big-endian, seven
+bits a byte, every byte but the last carrying one more than its digit."
+  (let ((bytes (list (ldb (byte 7 0) distance))))
+    (loop (setq distance (ash distance -7))
+          (when (zerop distance) (return))
+          (decf distance)
+          (push (logior #x80 (ldb (byte 7 0) distance)) bytes))
+    (dolist (byte bytes) (buffer-byte buffer byte))))
+
+(defun octets< (a b)
+  (loop for x across a for y across b
+        unless (= x y) return (< x y)
+        finally (return nil)))
+
+(defun write-pack-index-octets (entries pack-sha)
+  "A version 2 pack index, as octets: ENTRIES a list of (raw-oid crc
+offset), PACK-SHA the pack's trailing checksum (20 octets)."
+  (let* ((sorted (sort (copy-list entries) #'octets< :key #'first))
+         (count (length sorted))
+         (buffer (make-buffer (+ 1032 (* count 28) 40)))
+         (large nil))
+    (buffer-write buffer (octets 255 (char-code #\t) (char-code #\O) (char-code #\c)))
+    (buffer-write buffer (be32-octets 2))
+    (let ((seen 0) (rest sorted))
+      (dotimes (first 256)
+        (loop while (and rest (= (aref (first (car rest)) 0) first))
+              do (incf seen) (pop rest))
+        (buffer-write buffer (be32-octets seen))))
+    (dolist (entry sorted) (buffer-write buffer (first entry)))
+    (dolist (entry sorted) (buffer-write buffer (be32-octets (second entry))))
+    (dolist (entry sorted)
+      (let ((offset (third entry)))
+        (if (< offset #x80000000)
+            (buffer-write buffer (be32-octets offset))
+            (progn (buffer-write buffer (be32-octets (logior #x80000000 (length large))))
+                   (setq large (append large (list offset)))))))
+    (dolist (offset large)
+      (buffer-write buffer (be32-octets (ash offset -32)))
+      (buffer-write buffer (be32-octets (ldb (byte 32 0) offset))))
+    (buffer-write buffer pack-sha)
+    (buffer-write buffer (sha1-octets (buffer-octets buffer)))
+    (buffer-octets buffer)))
+
+(defun ensure-offset-tables (index)
+  "INDEX with its two tables by offset filled: where each entry ends,
+and which id sits at each offset.  Computed on first use."
+  (unless (pack-index-ends index)
+    (let* ((count (pack-index-count index))
+           (offsets (make-array count))
+           (by-offset (make-hash-table))
+           (ends (make-hash-table))
+           (size (with-open-file (in (pack-index-path index) :element-type '(unsigned-byte 8))
+                   (file-length in))))
+      (dotimes (i count)
+        (let ((offset (index-offset-at index i)))
+          (setf (aref offsets i) offset
+                (gethash offset by-offset) (index-name-at index i))))
+      (setq offsets (sort offsets #'<))
+      (dotimes (i count)
+        (setf (gethash (aref offsets i) ends)
+              (if (< (1+ i) count) (aref offsets (1+ i)) (- size 20))))
+      (setf (pack-index-oids-by-offset index) by-offset
+            (pack-index-ends index) ends)))
+  index)
+
+(defun copy-pack-entries (index entries buffer wanted ofs-delta? write-whole)
+  "Append ENTRIES, a list of (offset . oid) in offset order, of INDEX's
+pack to BUFFER as they lie in the file, compressed.  WANTED maps an id
+that goes into the pack to t, or to its offset in BUFFER once written.
+A delta is copied as a delta when its base goes too: as an ofs-delta
+when OFS-DELTA? and the base is written already, else as a ref-delta;
+a delta whose base stays behind is written whole by WRITE-WHOLE, a
+function of an id."
+  (ensure-offset-tables index)
+  (let ((ends (pack-index-ends index))
+        (by-offset (pack-index-oids-by-offset index)))
+    (with-open-file (in (pack-index-path index) :element-type '(unsigned-byte 8))
+      (loop for (offset . oid) in entries
+            do (file-position in offset)
+               (multiple-value-bind (type size) (read-varint-header (lambda () (read-byte in)))
+                 (let* ((delta? (or (= type +obj-ofs-delta+) (= type +obj-ref-delta+)))
+                        (base-oid (cond ((= type +obj-ofs-delta+)
+                                         (gethash (- offset (read-ofs-delta-distance (lambda () (read-byte in)))) by-offset))
+                                        ((= type +obj-ref-delta+)
+                                         (let ((raw (make-octets 20)))
+                                           (read-sequence raw in)
+                                           (hex raw)))
+                                        (t nil))))
+                   (if (and delta? (not (and base-oid (gethash base-oid wanted))))
+                       (funcall write-whole oid)
+                       (let* ((payload-at (file-position in))
+                              (payload (make-octets (- (gethash offset ends) payload-at)))
+                              (out-offset (fill-pointer buffer)))
+                         (read-sequence payload in)
+                         (setf (gethash oid wanted) out-offset)
+                         (cond ((not delta?)
+                                (write-raw-entry-header buffer type size))
+                               ((and ofs-delta? (integerp (gethash base-oid wanted)))
+                                (write-raw-entry-header buffer +obj-ofs-delta+ size)
+                                (write-ofs-delta-distance buffer (- out-offset (gethash base-oid wanted))))
+                               (t (write-raw-entry-header buffer +obj-ref-delta+ size)
+                                  (buffer-write buffer (unhex base-oid))))
+                         (buffer-write buffer payload)))))))))

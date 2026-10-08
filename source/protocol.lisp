@@ -17,8 +17,9 @@
 ;;
 ;; What is advertised: for upload-pack `multi_ack_detailed',
 ;; `side-band-64k', `thin-pack' (we send none, but a client may ask),
-;; `no-progress', `include-tag', `allow-tip-sha1-in-want' and `symref'
-;; for HEAD; for receive-pack `report-status', `delete-refs',
+;; `ofs-delta' (deltas copied from our own packs go as ofs-deltas when
+;; the client takes them), `no-progress', `include-tag',
+;; `allow-tip-sha1-in-want' and `symref' for HEAD; for receive-pack `report-status', `delete-refs',
 ;; `side-band-64k', `quiet' and `ofs-delta' (we accept them).  Shallow
 ;; clones are not offered (a client asking --depth is told so by its
 ;; own git).
@@ -31,7 +32,7 @@
 (defun capabilities-of (service repository)
   (ecase service
     (:upload-pack
-     (format nil "multi_ack_detailed side-band-64k thin-pack no-progress include-tag allow-tip-sha1-in-want allow-reachable-sha1-in-want object-format=sha1 ~a~@[ symref=HEAD:~a~]"
+     (format nil "multi_ack_detailed side-band-64k thin-pack ofs-delta no-progress include-tag allow-tip-sha1-in-want allow-reachable-sha1-in-want object-format=sha1 ~a~@[ symref=HEAD:~a~]"
              *agent* (head-ref repository)))
     (:receive-pack
      (format nil "report-status delete-refs side-band-64k quiet ofs-delta object-format=sha1 ~a" *agent*))))
@@ -141,7 +142,8 @@ negotiation's ACKs and a NAK; with it, the ACK or NAK and the pack."
                 (oids (if (member "include-tag" caps :test #'string=)
                           (append oids (tags-pointing-into repository oids))
                           oids))
-                (pack (buffer-octets (write-pack repository (remove-duplicates oids :test #'string= :from-end t)))))
+                (pack (buffer-octets (write-pack repository (remove-duplicates oids :test #'string= :from-end t)
+                                                 :ofs-delta? (and (member "ofs-delta" caps :test #'string=) t)))))
            (cond (side-band?
                   (write-side-band buffer 1 pack)
                   (unless (member "no-progress" caps :test #'string=)

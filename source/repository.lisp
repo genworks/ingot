@@ -111,6 +111,23 @@ changed since."
                              (lambda (base-oid) (find-object repository base-oid)))
           (return (make-git-object type data oid)))))))
 
+(defun packed-location (repository oid)
+  "Two values: the pack index that has OID and its offset there; nil
+when no pack does."
+  (dolist (index (repository-pack-indexes repository))
+    (let ((i (index-find index oid)))
+      (when i (return (values index (index-offset-at index i)))))))
+
+(defun register-pack! (repository idx-file pack-file)
+  "A pack just written under objects/pack/: its index read and added to
+the repository's list at once, rather than when the directory's write
+date moves (two pushes within a second would hide the second)."
+  (let ((index (read-pack-index idx-file pack-file)))
+    (unless (find (pack-index-path index) (repository-packs repository) :key #'pack-index-path :test #'equal)
+      (push index (repository-packs repository)))
+    (setf (repository-packs-stamp repository) (file-write-date (pack-directory repository)))
+    index))
+
 ;;; Objects
 
 (defun cache-get (repository oid)

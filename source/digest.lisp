@@ -44,27 +44,64 @@ bits as a big-endian 64-bit number, to a multiple of 64 bytes."
 ;;; SHA-1
 
 (defun sha1-digest (octets)
-  "The 20 octets of the SHA-1 of OCTETS."
-  (let ((padded (pad-message (as-octets octets) 512))
-        (h0 #x67452301) (h1 #xEFCDAB89) (h2 #x98BADCFE) (h3 #x10325476) (h4 #xC3D2E1F0)
-        (w (make-array 80 :element-type 'u32 :initial-element 0)))
-    (declare (type u32 h0 h1 h2 h3 h4))
-    (loop for block from 0 below (length padded) by 64
-          do (dotimes (i 16)
-               (setf (aref w i) (be32 padded (+ block (* 4 i)))))
+  "The 20 octets of the SHA-1 of OCTETS.  Typed throughout: a push
+hashes every object it carries, and gendl's 149 MB took minutes at the
+untyped version's 5 MB/s (2026-10-08)."
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (let* ((octets (as-octets octets))
+         (n (length octets))
+         (h0 #x67452301) (h1 #xEFCDAB89) (h2 #x98BADCFE) (h3 #x10325476) (h4 #xC3D2E1F0)
+         (w (make-array 80 :element-type 'u32 :initial-element 0))
+         (tail-start (* 64 (floor n 64)))
+         ;; what follows the last whole block, padded out to one or two blocks
+         (tail (let* ((rest (- n tail-start))
+                      (total (* 64 (ceiling (+ rest 9) 64)))
+                      (out (make-array total :element-type '(unsigned-byte 8) :initial-element 0))
+                      (bits (* 8 n)))
+                 (replace out octets :start2 tail-start)
+                 (setf (aref out rest) #x80)
+                 (loop for i from 0 below 8
+                       do (setf (aref out (- total 1 i)) (ldb (byte 8 (* 8 i)) bits)))
+                 out)))
+    (declare (type (simple-array (unsigned-byte 8) (*)) octets tail)
+             (type u32 h0 h1 h2 h3 h4)
+             (type (simple-array u32 (80)) w)
+             (type fixnum n tail-start))
+    (flet ((sha1-block (source at)
+             (declare (type (simple-array (unsigned-byte 8) (*)) source) (type fixnum at))
+             (dotimes (i 16)
+               (let ((k (+ at (* 4 i))))
+                 (declare (type fixnum k))
+                 (setf (aref w i) (logior (ash (aref source k) 24) (ash (aref source (+ k 1)) 16)
+                                          (ash (aref source (+ k 2)) 8) (aref source (+ k 3))))))
              (loop for i from 16 below 80
-                   do (setf (aref w i) (rotl32 (logxor (aref w (- i 3)) (aref w (- i 8)) (aref w (- i 14)) (aref w (- i 16))) 1)))
+                   do (let ((x (logxor (aref w (- i 3)) (aref w (- i 8)) (aref w (- i 14)) (aref w (- i 16)))))
+                        (declare (type u32 x))
+                        (setf (aref w i) (logand #xffffffff (logior (ash x 1) (ash x -31))))))
              (let ((a h0) (b h1) (c h2) (d h3) (e h4))
                (declare (type u32 a b c d e))
-               (dotimes (i 80)
-                 (multiple-value-bind (f k)
-                     (cond ((< i 20) (values (logior (logand b c) (logand (logxor b #xffffffff) d)) #x5A827999))
-                           ((< i 40) (values (logxor b c d) #x6ED9EBA1))
-                           ((< i 60) (values (logior (logand b c) (logand b d) (logand c d)) #x8F1BBCDC))
-                           (t (values (logxor b c d) #xCA62C1D6)))
-                   (let ((temp (u32+ (rotl32 a 5) f e k (aref w i))))
-                     (setq e d d c c (rotl32 b 30) b a a temp))))
-               (setq h0 (u32+ h0 a) h1 (u32+ h1 b) h2 (u32+ h2 c) h3 (u32+ h3 d) h4 (u32+ h4 e))))
+               (macrolet ((rounds (from to f k)
+                            `(loop for i from ,from below ,to
+                                   do (let ((temp (logand #xffffffff
+                                                          (+ (logand #xffffffff (logior (ash a 5) (ash a -27)))
+                                                             ,f e ,k (aref w i)))))
+                                        (declare (type u32 temp))
+                                        (setq e d
+                                              d c
+                                              c (logand #xffffffff (logior (ash b 30) (ash b -2)))
+                                              b a
+                                              a temp)))))
+                 (rounds 0 20 (logior (logand b c) (logand (logxor b #xffffffff) d)) #x5A827999)
+                 (rounds 20 40 (logxor b c d) #x6ED9EBA1)
+                 (rounds 40 60 (logior (logand b c) (logand b d) (logand c d)) #x8F1BBCDC)
+                 (rounds 60 80 (logxor b c d) #xCA62C1D6))
+               (setq h0 (logand #xffffffff (+ h0 a))
+                     h1 (logand #xffffffff (+ h1 b))
+                     h2 (logand #xffffffff (+ h2 c))
+                     h3 (logand #xffffffff (+ h3 d))
+                     h4 (logand #xffffffff (+ h4 e))))))
+      (loop for at of-type fixnum from 0 below tail-start by 64 do (sha1-block octets at))
+      (loop for at of-type fixnum from 0 below (length tail) by 64 do (sha1-block tail at)))
     (let ((out (make-octets 20)))
       (put-be32 out 0 h0) (put-be32 out 4 h1) (put-be32 out 8 h2) (put-be32 out 12 h3) (put-be32 out 16 h4)
       out)))

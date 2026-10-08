@@ -57,7 +57,7 @@
    ;; merge
    #:merge-trees #:merge-text #:merge-branches! #:merge-conflict #:can-merge?
    ;; pack
-   #:write-pack #:index-pack #:store-pack!
+   #:write-pack #:index-pack #:store-pack! #:*store-packs?*
    ;; protocol
    #:advertise-refs #:upload-pack #:receive-pack #:parse-receive-commands
    ;; archive

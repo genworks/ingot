@@ -199,6 +199,38 @@ Another line.
            (let* ((base (ingot:string-to-octets "hello world"))
                   (delta (ingot::octets 11 7 #x90 5 2 (char-code #\X) (char-code #\Y))))
              (string= (ingot:octets-to-string (ingot::apply-delta base delta)) "helloXY")))
+         (agit-check "the empty blob survives a pack: deflate of nothing is a whole stream"
+           (let* ((empty (ingot:write-blob repo (ingot:make-octets 0)))
+                  (pack (ingot::buffer-octets (ingot:write-pack repo (list empty c2))))
+                  (objects (ingot:index-pack pack (constantly nil))))
+             (and (string= empty "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
+                  (= (length objects) 2)
+                  (= 8 (length (ingot::deflate (ingot:make-octets 0))))
+                  (zerop (length (ingot::inflate (ingot::deflate (ingot:make-octets 0)))))
+                  (find empty objects :key #'ingot:object-oid :test #'string=))))
+         (agit-check "an ofs-delta distance round trip"
+           (every (lambda (n)
+                    (let ((b (ingot::make-buffer)))
+                      (ingot::write-ofs-delta-distance b n)
+                      (let ((at 0) (octets (ingot::buffer-octets b)))
+                        (= n (ingot::read-ofs-delta-distance (lambda () (prog1 (aref octets at) (incf at))))))))
+                  '(0 1 127 128 129 255 256 16383 16384 16511 16512 2097151 2097152 300000000)))
+         (agit-check "a pack index written and read again"
+           (let* ((oids (ingot:reachable-objects repo (list c2) nil))
+                  (entries (loop for oid in oids for i from 0
+                                 collect (list (ingot:unhex oid) (* 7 i) (+ 12 (* 100 i)))))
+                  (sha (ingot:make-octets 20 7))
+                  (idx (merge-pathnames "written.idx" root))
+                  (pack (merge-pathnames "written.pack" root)))
+             (ingot:write-file-octets idx (ingot::write-pack-index-octets entries sha))
+             (ingot:write-file-octets pack (ingot:make-octets 32))
+             (let ((index (ingot::read-pack-index idx pack)))
+               (and (= (ingot::pack-index-count index) (length oids))
+                    (every (lambda (entry)
+                             (let ((i (ingot::index-find index (ingot:hex (first entry)))))
+                               (and i (= (ingot::index-offset-at index i) (third entry)))))
+                           entries)
+                    (null (ingot::index-find index (make-string 40 :initial-element #\f)))))))
          (agit-check "receive-pack into an empty repository, then upload-pack out of it"
            (setq other (ingot:init-repository (merge-pathnames "two.git/" root)))
            (let* ((oids (ingot:reachable-objects repo (list c2) nil))
@@ -239,6 +271,13 @@ Another line.
                                        ((= (aref line 0) 1) (ingot::buffer-write received line :start 1)))))
                              (= (length (ingot:index-pack (ingot::buffer-octets received) (constantly nil)))
                                 (length oids)))))))))
+         (agit-check "the push was kept as a pack with its index, and reads from it"
+           (let ((packs (uiop:directory-files (merge-pathnames "two.git/objects/pack/" root) "*.pack"))
+                 (idxs (uiop:directory-files (merge-pathnames "two.git/objects/pack/" root) "*.idx")))
+             (and (= (length packs) 1) (= (length idxs) 1)
+                  (not (ingot::loose-object-exists? (ingot::repository-path other) c2))
+                  (let ((object (ingot::find-packed-object other c2)))
+                    (and object (eq (ingot:object-type object) :commit))))))
          (agit-check "a push that is not a fast-forward is refused by the check"
            (let* ((request (ingot::buffer-octets
                             (let ((b (ingot::make-buffer)))

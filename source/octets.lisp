@@ -202,9 +202,17 @@ existing target; uiop does the dance."
   (make-array size :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
 
 (defun buffer-write (buffer octets &key (start 0) end)
-  (loop for i from start below (or end (length octets))
-        do (vector-push-extend (aref octets i) buffer (max 1024 (length buffer))))
-  buffer)
+  "Append OCTETS (from START to END) to BUFFER, growing it by halves:
+a pack of a hundred megabytes is not written a byte at a time."
+  (let* ((end (or end (length octets)))
+         (n (- end start))
+         (fill (fill-pointer buffer))
+         (need (+ fill n)))
+    (when (> need (array-dimension buffer 0))
+      (adjust-array buffer (max need (+ (array-dimension buffer 0) (ceiling (array-dimension buffer 0) 2) 1024))))
+    (setf (fill-pointer buffer) need)
+    (replace buffer octets :start1 fill :start2 start :end2 end)
+    buffer))
 
 (defun buffer-byte (buffer byte)
   (vector-push-extend byte buffer (max 1024 (length buffer)))
