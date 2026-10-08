@@ -70,7 +70,9 @@ answers (:ref . target)."
            (let* ((name (enough-namestring file gitdir))
                   (name (substitute #\/ #\\ name)))
              (unless (or (search ".lock" name) (search ".tmp" name))
-               (let ((value (loose-ref-value gitdir name)))
+               ;; a symbolic ref (refs/remotes/origin/HEAD) is listed
+               ;; resolved, as git for-each-ref lists it
+               (let ((value (ignore-errors (ref-value gitdir name))))
                  (when (stringp value) (push (cons name value) found)))))))))
     found))
 
