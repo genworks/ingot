@@ -260,3 +260,130 @@ and the list of ref-commands with their :status (:ok or :ng) and
   "True when moving a ref from OLD to NEW loses nothing: OLD is absent,
 or an ancestor of NEW."
   (or (null old) (string= old *zero-oid*) (ancestor? repository old new)))
+
+;;; The client side: a fetch (a clone, or bringing a repository up to
+;;; date) from another server over a transport the caller provides --
+;;; a function of (SERVICE BODY) answering octets: with BODY nil, the
+;;; refs advertisement (GET .../info/refs?service=git-SERVICE); with
+;;; BODY, the service's answer to it (POST .../git-SERVICE).  Ingot
+;;; knows no HTTP; the forge above lends it a client.
+
+(defun parse-advertisement (octets &key (smart-http t))
+  "Values: an alist of (name . oid) of the refs a server advertises
+(peeled tag entries and the capabilities line left out), the
+capability strings, and the ref HEAD names there when the server says
+(symref=HEAD:...)."
+  (let ((at 0) (refs nil) (caps nil) (head nil))
+    (when smart-http
+      ;; "# service=git-upload-pack" and a flush come first
+      (multiple-value-bind (line next) (read-pkt-line octets 0)
+        (when (and (vectorp line) (plusp (length line)) (= (aref line 0) (char-code #\#)))
+          (setq at next)
+          (multiple-value-bind (flush next2) (read-pkt-line octets at)
+            (when (eq flush :flush) (setq at next2))))))
+    (dolist (line (read-pkt-lines octets :start at))
+      (unless (eq line :delim)
+        (let* ((text (pkt-text line))
+               (nul (position (code-char 0) text)))
+          (when nul
+            (setq caps (remove "" (uiop:split-string (subseq text (1+ nul)) :separator " ") :test #'string=)
+                  text (subseq text 0 nul)))
+          (when (and (> (length text) 41) (char= (char text 40) #\Space) (oid? (subseq text 0 40)))
+            (let ((name (subseq text 41)))
+              (unless (or (string= name "capabilities^{}")
+                          (and (> (length name) 3) (string= "^{}" name :start2 (- (length name) 3))))
+                (push (cons name (subseq text 0 40)) refs)))))))
+    (dolist (cap caps)
+      (when (and (> (length cap) 12) (string= "symref=HEAD:" cap :end2 12))
+        (setq head (subseq cap 12))))
+    (values (nreverse refs) caps head)))
+
+(defparameter *fetch-capabilities* '("multi_ack_detailed" "side-band-64k" "ofs-delta" "no-progress" "include-tag")
+  "What a fetch of ours asks of the server.")
+
+(defun fetch-request (wants haves &key (capabilities *fetch-capabilities*))
+  "The body of an upload-pack request asking for WANTS with HAVES here
+already, ending in done: the whole negotiation in one round, as
+stateless HTTP allows."
+  (let ((buffer (make-buffer 4096)) (first? t))
+    (dolist (want wants)
+      (write-pkt-line buffer (if first?
+                                 (format nil "want ~a ~{~a~^ ~} ~a~%" want capabilities *agent*)
+                                 (format nil "want ~a~%" want)))
+      (setq first? nil))
+    (write-pkt-flush buffer)
+    (dolist (have haves) (write-pkt-line buffer (format nil "have ~a~%" have)))
+    (write-pkt-line buffer (format nil "done~%"))
+    (buffer-octets buffer)))
+
+(defun parse-fetch-response (octets)
+  "What upload-pack answered: values the pack (octets; nil when none
+came), the acknowledgement lines, and the progress text.  An error
+band or an ERR line signals git-error."
+  (let ((pack (make-buffer (max 1024 (length octets))))
+        (acks nil) (progress (make-string-output-stream)) (at 0) (any-pack? nil))
+    (loop
+      ;; a server not asked for a side band sends the pack bare after its NAK
+      (when (and (<= (+ at 4) (length octets)) (equalp (suboctets octets at (+ at 4)) (ascii "PACK")))
+        (buffer-write pack octets :start at)
+        (setq any-pack? t)
+        (return))
+      (multiple-value-bind (line next) (read-pkt-line octets at)
+        (setq at next)
+        (cond ((null line) (return))
+              ((eq line :flush))
+              ((eq line :delim))
+              ((zerop (length line)))
+              ((= (aref line 0) 1) (setq any-pack? t) (buffer-write pack line :start 1))
+              ((= (aref line 0) 2) (write-string (octets-to-string line :start 1) progress))
+              ((= (aref line 0) 3)
+               (git-error "The server says: ~a" (string-trim '(#\Newline) (octets-to-string line :start 1))))
+              (t (let ((text (pkt-text line)))
+                   (cond ((and (>= (length text) 3) (string= "ERR" text :end2 3))
+                          (git-error "The server says: ~a" (string-trim " " (subseq text 3))))
+                         ((string= text "NAK"))
+                         (t (push text acks))))))))
+    (values (and any-pack? (buffer-octets pack)) (nreverse acks) (get-output-stream-string progress))))
+
+(defun ref-under? (name prefixes)
+  (some (lambda (prefix) (and (> (length name) (length prefix)) (string= prefix name :end2 (length prefix)))) prefixes))
+
+(defun fetch! (repository transport &key (prefixes '("refs/heads/" "refs/tags/")) (prune? t) (set-head? t))
+  "Bring REPOSITORY up to date with the server behind TRANSPORT (a
+function of a service keyword and a body: nil asks for the refs
+advertisement, octets for the service's answer to them): every ref
+under PREFIXES fetched and set, those the server no longer has deleted
+when PRUNE?, HEAD pointed where the server's points when SET-HEAD?.
+What is here already is told to the server, so a second fetch brings
+only what is new.  Values: the refs set (an alist), the refs deleted
+(names), and the number of objects received."
+  (multiple-value-bind (theirs caps head) (parse-advertisement (funcall transport :upload-pack nil))
+    (declare (ignore caps))
+    (let* ((wanted (remove-if-not (lambda (ref) (ref-under? (car ref) prefixes)) theirs))
+           (ours (refs repository))
+           (wants (remove-duplicates (remove-if (lambda (oid) (object-exists? repository oid)) (mapcar #'cdr wanted))
+                                     :test #'string=))
+           (haves (remove-duplicates (mapcar #'cdr ours) :test #'string=))
+           (received 0))
+      (when wants
+        (let ((pack (parse-fetch-response (funcall transport :upload-pack (fetch-request wants haves)))))
+          (when pack
+            (with-repository-lock (repository)
+              (setq received (length (store-pack! repository pack)))))))
+      (dolist (ref wanted)
+        (unless (object-exists? repository (cdr ref))
+          (git-error "The server did not send ~a (~a)." (cdr ref) (car ref))))
+      (let ((set nil) (deleted nil))
+        (dolist (ref wanted)
+          (unless (equal (cdr (assoc (car ref) ours :test #'string=)) (cdr ref))
+            (update-ref! repository (car ref) (cdr ref))
+            (push ref set)))
+        (when prune?
+          (dolist (ref ours)
+            (when (and (ref-under? (car ref) prefixes) (not (assoc (car ref) wanted :test #'string=)))
+              (delete-ref! repository (car ref))
+              (push (car ref) deleted))))
+        (when (and set-head? head (> (length head) 11) (string= "refs/heads/" head :end2 11)
+                   (assoc head wanted :test #'string=))
+          (set-default-branch! repository (subseq head 11)))
+        (values (nreverse set) (nreverse deleted) received)))))

@@ -60,6 +60,7 @@
    #:write-pack #:index-pack #:store-pack! #:*store-packs?*
    ;; protocol
    #:advertise-refs #:upload-pack #:receive-pack #:parse-receive-commands
+   #:parse-advertisement #:fetch-request #:parse-fetch-response #:fetch! #:*fetch-capabilities*
    ;; archive
    #:tar-tree #:tar-gz-tree #:zip-tree #:tar-entries #:tar-append-entry #:tar-find #:untar
    ;; conditions
