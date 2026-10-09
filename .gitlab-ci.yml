@@ -1,0 +1,18 @@
+# Ingot's pipeline on a GitLab: load the system on a cold Lisp image
+# and run its checks (ci/test.lisp says what it does).  The image is
+# Gendl's, for the Quicklisp it carries; Ingot itself needs no Gendl.
+
+stages:
+  - test
+
+variables:
+  GIT_DEPTH: "1"
+
+cold-load-and-check:
+  stage: test
+  image: genworks/gendl:devo-ccl
+  tags:
+    - common-lisp.net
+  script:
+    - cd /opt/gendl
+    - INGOT_DIR="$CI_PROJECT_DIR" ./gdl/program/gdl-ccl -n -b --load "$CI_PROJECT_DIR/ci/test.lisp"

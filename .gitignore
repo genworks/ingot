@@ -1,0 +1,5 @@
+*.fasl
+*.lx64fsl
+*.dx64fsl
+*.wx64fsl
+*~

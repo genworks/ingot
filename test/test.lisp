@@ -13,7 +13,7 @@
 ;;; protocol end to end, with no git binary anywhere.  With INGOT_REPO
 ;;; naming an existing repository (a checkout or a bare one), it also
 ;;; reads that one: its head, its log, its tree.  It prints a line per
-;;; check; with ANVIL_CI set it leaves the Lisp with status 0 or 1,
+;;; check; with INGOT_CI (or ANVIL_CI) set it leaves the Lisp with status 0 or 1,
 ;;; otherwise it signals at the end when anything failed.
 ;;;
 
@@ -331,6 +331,6 @@ C
                  (and head (ingot:commit-tree commit)))))))
     (ignore-errors (uiop:delete-directory-tree root :validate t :if-does-not-exist :ignore)))
   (format t "~&~d check~:p, ~d failure~:p.~%" *agit-checks* (length *agit-failures*))
-  (cond ((uiop:getenv "ANVIL_CI") (uiop:quit (if *agit-failures* 1 0)))
+  (cond ((or (uiop:getenv "INGOT_CI") (uiop:getenv "ANVIL_CI")) (uiop:quit (if *agit-failures* 1 0)))
         (*agit-failures* (error "ingot: ~{~a~^; ~}" (reverse *agit-failures*)))
         (t :all-passed)))

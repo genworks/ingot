@@ -8,8 +8,11 @@ bases, tree and line diffs, three-way merges, the smart protocol's
 server side (`upload-pack` and `receive-pack` over stateless HTTP) with
 the pack a fetch answers with, the client side of a fetch over a
 transport the caller lends, and archives of a tree.  It is the Git
-engine of [Anvil](../), the forge, and a system of its own that loads
-into any Lisp with ASDF.
+engine of [Anvil](https://gitlab.common-lisp.net/clo/anvil), the forge,
+and a repository and system of its own that loads into any Lisp with
+ASDF: this one, mirrored for the public at
+[clo/ingot](https://gitlab.common-lisp.net/clo/ingot) on
+gitlab.common-lisp.net, where issues and merge requests go.
 
 Scope, on purpose: a reliable server-side engine, not the porcelain.
 There is no work tree, no index, no `git status`; a commit is made from
@@ -18,7 +21,7 @@ a base tree and a list of actions.
 ## Loading
 
 ```lisp
-(asdf:load-asd "/path/to/anvil/ingot/ingot.asd")
+(asdf:load-asd "/path/to/ingot/ingot.asd")
 (ql:quickload :ingot)            ; chipz, salza2, babel, bordeaux-threads
 ```
 
@@ -122,7 +125,9 @@ mirror needs.  Rename detection in diffs.  Submodule contents.
 
 `test/test.lisp` makes a repository in a scratch directory and works
 every part, protocol included, with no git anywhere; `INGOT_REPO=` names
-a real repository to read as well.  `test/differential.sh` is the
+a real repository to read as well.  `ci/test.lisp` is the pipeline's
+run of it: the system loaded cold on a Lisp image, where a warning in
+Ingot's own files fails the job, then the checks.  `test/differential.sh` is the
 differential suite: it asks the host's `git` for the facts of a
 repository and has Ingot, in a Lisp container, answer the same
 questions, and compares.

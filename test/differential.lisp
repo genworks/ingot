@@ -9,13 +9,13 @@
 ;;;
 ;;; The Lisp half of differential.sh: Ingot answers the questions git
 ;;; answered into /facts, and the answers are compared.  Runs in a Lisp
-;;; container; /repo is the repository, /anvil this checkout.
+;;; container; /repo is the repository, /ingot this checkout.
 ;;;
 
 (in-package :cl-user)
 
 (when (fboundp (find-symbol "LOAD-QUICKLISP" :gdl-user)) (funcall (find-symbol "LOAD-QUICKLISP" :gdl-user)))
-(asdf:load-asd "/anvil/ingot/ingot.asd")
+(asdf:load-asd "/ingot/ingot.asd")
 (funcall (read-from-string "ql:quickload") :ingot :silent t)
 
 (defvar *failures* nil)

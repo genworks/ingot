@@ -2,7 +2,7 @@
 # Ingot's differential suite: the host's git and Ingot answer the same
 # questions about a repository, and the answers must agree.
 #
-#   ingot/test/differential.sh /path/to/repository [image]
+#   test/differential.sh /path/to/repository [image]
 #
 # git runs here; Ingot runs in a Lisp container (genworks/gendl:devo-sbcl
 # unless another image is named) that mounts the repository read-only
@@ -10,7 +10,7 @@
 set -eu
 repo=${1:?a repository}
 image=${2:-genworks/gendl:devo-sbcl}
-here=$(cd "$(dirname "$0")/../.." && pwd)
+here=$(cd "$(dirname "$0")/.." && pwd)
 facts=$(mktemp -d)
 trap 'rm -rf "$facts"' EXIT
 
@@ -39,7 +39,7 @@ fi
 echo "git's facts written; asking Ingot in $image"
 docker run --rm \
   -v "$(cd "$repo" && pwd)":/repo:ro \
-  -v "$here":/anvil:ro \
+  -v "$here":/ingot:ro \
   -v "$facts":/facts:ro \
   "$image" \
-  sh -c 'cd /opt/gendl && ./gdl/program/gdl-$(case "$0" in *ccl*) echo ccl;; *) echo sbcl;; esac) -n -b --load /anvil/ingot/test/differential.lisp' "$image"
+  sh -c 'cd /opt/gendl && ./gdl/program/gdl-$(case "$0" in *ccl*) echo ccl;; *) echo sbcl;; esac) -n -b --load /ingot/test/differential.lisp' "$image"
