@@ -7,12 +7,22 @@ stages:
 
 variables:
   GIT_DEPTH: "1"
+  # The runner's tag: this file runs on two GitLabs (the project is
+  # mirrored), whose container runners carry different tags.
+  RUNNER_TAG: "common-lisp.net"
+
+workflow:
+  rules:
+    - if: $CI_SERVER_HOST == "gitlab.genworks.com"
+      variables:
+        RUNNER_TAG: "amd64-docker"
+    - when: always
 
 cold-load-and-check:
   stage: test
   image: genworks/gendl:devo-ccl
   tags:
-    - common-lisp.net
+    - $RUNNER_TAG
   script:
     - cd /opt/gendl
     - INGOT_DIR="$CI_PROJECT_DIR" ./gdl/program/gdl-ccl -n -b --load "$CI_PROJECT_DIR/ci/test.lisp"
