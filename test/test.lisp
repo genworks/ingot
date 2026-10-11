@@ -37,7 +37,7 @@
 (let* ((root (agit-scratch-directory))
        (repo nil) (other nil)
        (who (ingot:make-identity "Test Person" "test@example.org" :time 1700000000))
-       (c1 nil) (c2 nil) (c3 nil))
+       (c1 nil) (c2 nil))
   (setq *agit-failures* nil *agit-checks* 0)
   (unwind-protect
        (progn
