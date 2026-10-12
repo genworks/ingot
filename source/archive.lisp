@@ -141,9 +141,13 @@ honored."
           (t nil))
     buffer))
 
+(defun plain-tar-name (name)
+  "NAME without a leading ./ (what the Docker API's archives carry)."
+  (if (and (> (length name) 2) (string= "./" name :end2 2)) (subseq name 2) name))
+
 (defun tar-find (tar path)
   "The data (octets) of PATH in TAR, or nil."
-  (let ((entry (find path (tar-entries tar) :key (lambda (e) (string-left-trim "./" (getf e :name))) :test #'string=)))
+  (let ((entry (find path (tar-entries tar) :key (lambda (e) (plain-tar-name (getf e :name))) :test #'string=)))
     (and entry (getf entry :data))))
 
 (defun untar (tar directory)
@@ -151,7 +155,7 @@ honored."
 Entries that would leave the directory are refused."
   (let ((root (uiop:ensure-directory-pathname directory)))
     (dolist (entry (tar-entries tar))
-      (let ((name (string-left-trim "./" (getf entry :name))))
+      (let ((name (plain-tar-name (getf entry :name))))
         (when (or (search ".." name) (and (plusp (length name)) (char= (char name 0) #\/)))
           (git-error "~a would leave the directory." name))
         (cond ((char= (getf entry :type) #\5)

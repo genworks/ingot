@@ -116,13 +116,13 @@ negotiation's ACKs and a NAK; with it, the ACK or NAK and the pack."
          (tips (mapcar #'cdr (refs repository))))
     (when (getf request :deepen)
       (return-from upload-pack
-        (protocol-error buffer side-band? "Shallow clones are not offered here; fetch without --depth.")))
+        (protocol-error buffer "Shallow clones are not offered here; fetch without --depth.")))
     (dolist (want wants)
-      (unless (oid? want) (return-from upload-pack (protocol-error buffer side-band? (format nil "not a valid object id: ~a" want))))
+      (unless (oid? want) (return-from upload-pack (protocol-error buffer (format nil "not a valid object id: ~a" want))))
       (unless (object-exists? repository want)
-        (return-from upload-pack (protocol-error buffer side-band? (format nil "not our ref ~a" want))))
+        (return-from upload-pack (protocol-error buffer (format nil "not our ref ~a" want))))
       (unless (or (member want tips :test #'string=) (funcall allowed-want? want))
-        (return-from upload-pack (protocol-error buffer side-band? (format nil "not our ref ~a" want)))))
+        (return-from upload-pack (protocol-error buffer (format nil "not our ref ~a" want)))))
     (let ((common (remove-if-not (lambda (have) (and (oid? have) (object-exists? repository have))) haves)))
       (cond
         ((not (getf request :done?))
@@ -164,10 +164,9 @@ themselves there: what include-tag adds."
                     (gethash (tag-object (parse-tag (object-data object) oid)) table))
             collect oid)))
 
-(defun protocol-error (buffer side-band? text)
-  "An error the client prints: an ERR pkt-line (git understands it on
-either side of the band)."
-  (declare (ignore side-band?))
+(defun protocol-error (buffer text)
+  "An error the client prints: an ERR pkt-line, which git understands
+inside or outside a side band."
   (write-pkt-line buffer (format nil "ERR ~a~%" text))
   (buffer-octets buffer))
 

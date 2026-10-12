@@ -9,11 +9,9 @@
 (in-package :ingot)
 
 ;;
-;; SHA-1 (what names every object), SHA-256 and HMAC and PBKDF2 (what
-;; the forge hashes passwords with), and CRC-32 (zip): in plain Common
-;; Lisp, so that nothing here depends on a library a Lisp image may
-;; lack.  Straight from the standards; fast enough for packs of some
-;; tens of megabytes.
+;; SHA-1 (what names every object), SHA-256 with HMAC and PBKDF2 (what
+;; the forge hashes passwords with), and CRC-32 (zip), in plain Common
+;; Lisp so that nothing here depends on a library a Lisp image may lack.
 ;;
 
 (deftype u32 () '(unsigned-byte 32))
@@ -27,10 +25,9 @@
   (declare (type u32 x) (type (integer 0 32) n))
   (logand #xffffffff (logior (ash x n) (ash x (- n 32)))))
 
-(defun pad-message (octets block-bits)
+(defun pad-message (octets)
   "OCTETS with the standard padding: a 1 bit, zeros, and the length in
 bits as a big-endian 64-bit number, to a multiple of 64 bytes."
-  (declare (ignore block-bits))
   (let* ((n (length octets))
          (bits (* 8 n))
          (total (* 64 (ceiling (+ n 9) 64)))
@@ -45,8 +42,7 @@ bits as a big-endian 64-bit number, to a multiple of 64 bytes."
 
 (defun sha1-digest (octets)
   "The 20 octets of the SHA-1 of OCTETS.  Typed throughout: a push
-hashes every object it carries, and gendl's 149 MB took minutes at the
-untyped version's 5 MB/s (2026-10-08)."
+hashes every object it carries."
   (declare (optimize (speed 3) (safety 0) (debug 0)))
   (let* ((octets (as-octets octets))
          (n (length octets))
@@ -126,7 +122,7 @@ untyped version's 5 MB/s (2026-10-08)."
 
 (defun sha256-digest (octets)
   "The 32 octets of the SHA-256 of OCTETS."
-  (let ((padded (pad-message (as-octets octets) 512))
+  (let ((padded (pad-message (as-octets octets)))
         (h (make-array 8 :element-type 'u32
                          :initial-contents '(#x6a09e667 #xbb67ae85 #x3c6ef372 #xa54ff53a
                                              #x510e527f #x9b05688c #x1f83d9ab #x5be0cd19)))

@@ -62,9 +62,6 @@ after the flush (or the end)."
 (defun write-pkt-flush (buffer)
   (buffer-write buffer (ascii "0000")))
 
-(defun write-pkt-delim (buffer)
-  (buffer-write buffer (ascii "0001")))
-
 (defun pkt-line (payload)
   "One pkt-line as octets."
   (buffer-octets (write-pkt-line (make-buffer 64) payload)))

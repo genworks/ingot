@@ -41,8 +41,8 @@
 (defun loose-ref-value (gitdir name)
   "The id in the loose ref NAME, nil when there is none; a symbolic ref
 answers (:ref . target)."
-  ;; probe-file signals on some Lisps when a component of the path is
-  ;; a file (refs/heads/master/src, asked while resolving a tree path)
+  ;; ignore-errors: probe-file signals on some Lisps when a component
+  ;; of the path is a file (refs/heads/master/src)
   (let ((file (ignore-errors (probe-file (ref-file gitdir name)))))
     (when (and file (not (uiop:directory-pathname-p file)))
       (let ((text (read-text-file-trimmed file)))

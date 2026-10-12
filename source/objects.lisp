@@ -96,12 +96,6 @@
   (sort (copy-list entries) (lambda (a b) (octets< (string-to-octets (tree-sort-key a))
                                                    (string-to-octets (tree-sort-key b))))))
 
-(defun octets< (a b)
-  (let ((n (min (length a) (length b))))
-    (dotimes (i n (< (length a) (length b)))
-      (when (/= (aref a i) (aref b i))
-        (return (< (aref a i) (aref b i)))))))
-
 (defun serialize-tree (entries)
   "A tree object's data from ENTRIES (sorted here as git sorts them)."
   (let ((buffer (make-buffer)))
@@ -115,7 +109,6 @@
 
 ;;; Identities: "Name <email> 1700000000 +0100"
 
-;; (Not named `identity': that is a function of the standard.)
 (defstruct ident
   (name "" :type string)
   (email "" :type string)

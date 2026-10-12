@@ -203,10 +203,9 @@ anywhere.  Values: the type and the data."
 
 (defun inflate-stream (stream expected-size)
   "EXPECTED-SIZE octets inflated from the zlib stream at STREAM's
-position.  A window of the file is read into memory first (zlib never
-grows data by more than a fraction of a percent plus a few bytes, so
-the window is bounded by the object's own size), and inflated from
-there: chipz inflates from a vector where it balks at a file stream."
+position.  A window of the file bounded by the object's own size is
+read first (zlib grows data by at most a fraction of a percent and a
+few bytes) and inflated from memory, where chipz is reliable."
   (let* ((at (file-position stream))
          (window (min (- (file-length stream) at)
                       (+ expected-size (ceiling expected-size 1000) 64)))
@@ -335,11 +334,6 @@ bits a byte, every byte but the last carrying one more than its digit."
           (decf distance)
           (push (logior #x80 (ldb (byte 7 0) distance)) bytes))
     (dolist (byte bytes) (buffer-byte buffer byte))))
-
-(defun octets< (a b)
-  (loop for x across a for y across b
-        unless (= x y) return (< x y)
-        finally (return nil)))
 
 (defun write-pack-index-octets (entries pack-sha)
   "A version 2 pack index, as octets: ENTRIES a list of (raw-oid crc

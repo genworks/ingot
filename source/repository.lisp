@@ -120,8 +120,8 @@ when no pack does."
 
 (defun register-pack! (repository idx-file pack-file)
   "A pack just written under objects/pack/: its index read and added to
-the repository's list at once, rather than when the directory's write
-date moves (two pushes within a second would hide the second)."
+the repository's list at once, since two pushes within one second leave
+the directory's write date where it was."
   (let ((index (read-pack-index idx-file pack-file)))
     (unless (find (pack-index-path index) (repository-packs repository) :key #'pack-index-path :test #'equal)
       (push index (repository-packs repository)))
@@ -177,9 +177,6 @@ when it is not of TYPE."
       (:commit (parse-commit (object-data object) oid))
       (:tag (read-commit repository (tag-object (parse-tag (object-data object) oid))))
       (t (git-error "~a is a ~(~a~), not a commit." oid (object-type object))))))
-
-(defun read-tag (repository oid)
-  (parse-tag (object-data (read-object repository oid :tag)) oid))
 
 (defun peel-to-commit (repository oid)
   "The id of the commit OID is or points at through tags, or nil."

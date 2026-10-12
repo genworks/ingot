@@ -124,16 +124,21 @@ nothing signals on a stranger's bytes."
       (read-sequence out in)
       out)))
 
+(defun temporary-beside (file)
+  "A pathname beside FILE for a half-written copy of it, shaped so that
+rename-file, which fills a missing name or type from the old name,
+leaves FILE as it is: a dotfile such as .hidden has no name on some
+Lisps, only a type."
+  (let ((stamp (format nil "tmp-~d-~d" (get-universal-time) (random 1000000))))
+    (if (pathname-name file)
+        (make-pathname :name (format nil "~a-~a" (pathname-name file) stamp) :type (pathname-type file) :defaults file)
+        (make-pathname :name nil :type (format nil "~a-~a" (pathname-type file) stamp) :defaults file))))
+
 (defun write-file-octets (file octets &key (if-exists :supersede))
   "Write OCTETS to FILE whole: to a temporary file beside it, then a
 rename, so that a reader never sees half a file."
   (ensure-directories-exist file)
-  ;; The temporary file keeps the target's type: rename-file merges the
-  ;; new name with the old one, so a "HEAD.tmp" renamed to "HEAD" would
-  ;; become "HEAD.tmp" again.
-  (let ((temporary (make-pathname :name (format nil "tmp-~a-~d-~d" (or (pathname-name file) "file")
-                                                (get-universal-time) (random 1000000))
-                                  :type (pathname-type file) :defaults file)))
+  (let ((temporary (temporary-beside file)))
     (with-open-file (out temporary :direction :output :element-type '(unsigned-byte 8)
                                    :if-exists :supersede)
       (write-sequence octets out))
@@ -144,8 +149,8 @@ rename, so that a reader never sees half a file."
     file))
 
 (defun rename-file-overwriting (from to)
-  "Rename FROM to TO, replacing TO.  Clozure CL's rename-file refuses an
-existing target; uiop does the dance."
+  "Rename FROM to TO, replacing TO (Clozure CL's rename-file refuses an
+existing target)."
   (uiop:rename-file-overwriting-target from to))
 
 (defun file-octets-if-exists (file)
@@ -156,11 +161,15 @@ existing target; uiop does the dance."
 (defun position-of (byte octets &key (start 0) end)
   (position byte octets :start start :end end))
 
-(defun octets-search (needle haystack &key (start 0))
-  (search needle haystack :start2 start))
-
 (defun octets= (a b)
   (and (= (length a) (length b)) (every #'= a b)))
+
+(defun octets< (a b)
+  "Lexicographic order on octet vectors, a proper prefix first."
+  (let ((n (min (length a) (length b))))
+    (dotimes (i n (< (length a) (length b)))
+      (when (/= (aref a i) (aref b i))
+        (return (< (aref a i) (aref b i)))))))
 
 ;;; Big-endian integers, as packs and indexes carry them
 
@@ -191,19 +200,13 @@ existing target; uiop does the dance."
 (defun universal-time (unix)
   (+ unix +unix-epoch+))
 
-(defun zone-string (&optional (offset-minutes 0))
-  "\"+0000\": OFFSET-MINUTES east of UTC as git writes a zone."
-  (multiple-value-bind (hours minutes) (floor (abs offset-minutes) 60)
-    (format nil "~a~2,'0d~2,'0d" (if (minusp offset-minutes) "-" "+") hours minutes)))
-
 ;;; An octet output buffer: a growing vector to write into
 
 (defun make-buffer (&optional (size 4096))
   (make-array size :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
 
 (defun buffer-write (buffer octets &key (start 0) end)
-  "Append OCTETS (from START to END) to BUFFER, growing it by halves:
-a pack of a hundred megabytes is not written a byte at a time."
+  "Append OCTETS (from START to END) to BUFFER, growing it by halves."
   (let* ((end (or end (length octets)))
          (n (- end start))
          (fill (fill-pointer buffer))
@@ -217,9 +220,6 @@ a pack of a hundred megabytes is not written a byte at a time."
 (defun buffer-byte (buffer byte)
   (vector-push-extend byte buffer (max 1024 (length buffer)))
   buffer)
-
-(defun buffer-string (buffer string)
-  (buffer-write buffer (string-to-octets string)))
 
 (defun buffer-octets (buffer)
   "The buffer's contents as a simple octet vector."

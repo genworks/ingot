@@ -21,13 +21,12 @@
 ;; A push's pack is kept as it came, under objects/pack/ with a version
 ;; 2 index of its own (fanout, sorted ids, a CRC-32 per entry, offsets);
 ;; the bases a thin pack lacks are appended and the trailer redone.
-;; With *store-packs?* nil every object is written loose instead, as
-;; before 2026-10-08.
+;; With *store-packs?* nil every object is written loose instead.
 ;;
 
 (defparameter *store-packs?* t
   "Whether a pushed pack is kept packed, with an index of its own, rather
-than exploded into loose objects.")
+than written out as loose objects.")
 
 (defun write-entry-header (buffer type size)
   (write-raw-entry-header buffer (pack-type-number type) size))
