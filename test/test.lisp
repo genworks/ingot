@@ -12,8 +12,9 @@
 ;;; commits, diffs, merges, packs, archives and both sides of the
 ;;; protocol are worked, with no git binary anywhere.  INGOT_REPO names
 ;;; an existing repository to read as well.  One line per check; with
-;;; INGOT_CI or ANVIL_CI set the Lisp leaves with status 0 or 1, else
-;;; a failure signals at the end.
+;;; INGOT_CI set the Lisp leaves with status 0 or 1, else a failure
+;;; signals at the end (Anvil's ci/test.lisp loads this file and goes
+;;; on to its own checks; ANVIL_CI is a variable its runner sets).
 ;;;
 
 (in-package :cl-user)
@@ -456,6 +457,6 @@ C
                  (and head (ingot:commit-tree commit)))))))
     (ignore-errors (uiop:delete-directory-tree root :validate t :if-does-not-exist :ignore)))
   (format t "~&~d check~:p, ~d failure~:p.~%" *ingot-checks* (length *ingot-failures*))
-  (cond ((or (uiop:getenv "INGOT_CI") (uiop:getenv "ANVIL_CI")) (uiop:quit (if *ingot-failures* 1 0)))
+  (cond ((uiop:getenv "INGOT_CI") (uiop:quit (if *ingot-failures* 1 0)))
         (*ingot-failures* (error "ingot: ~{~a~^; ~}" (reverse *ingot-failures*)))
         (t :all-passed)))

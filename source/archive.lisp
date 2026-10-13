@@ -56,25 +56,25 @@ is split at a slash into the prefix field."
     (unless (zerop rest)
       (buffer-write buffer (make-octets (- 512 rest))))))
 
-(defun tar-tree (repository tree-oid &key (prefix "") (mtime 0) (buffer (make-buffer (* 256 1024))))
+(defun tar-tree (repository tree-oid &key (prefix "") (mtime 0) (buffer (make-buffer (* 256 1024)))
+                                           (directory-mode #o755) (file-mode #o644) (executable-mode #o755))
   "A tar of the tree TREE-OID appended to BUFFER, every path under
-PREFIX (\"project-1.0/\"); answers the buffer."
+PREFIX (\"project-1.0/\"), with the modes given; answers the buffer."
   (when (plusp (length prefix))
-    (buffer-write buffer (tar-header prefix 0 :mode #o755 :type #\5 :mtime mtime)))
+    (buffer-write buffer (tar-header prefix 0 :mode directory-mode :type #\5 :mtime mtime)))
   (walk-tree repository tree-oid
              (lambda (path entry)
                (let ((name (concatenate 'string prefix path)))
                  (case (tree-entry-kind entry)
-                   (:tree (buffer-write buffer (tar-header (concatenate 'string name "/") 0
-                                                           :mode #o755 :type #\5 :mtime mtime)))
-                   (:submodule (buffer-write buffer (tar-header (concatenate 'string name "/") 0
-                                                                :mode #o755 :type #\5 :mtime mtime)))
+                   ((:tree :submodule)
+                    (buffer-write buffer (tar-header (concatenate 'string name "/") 0
+                                                     :mode directory-mode :type #\5 :mtime mtime)))
                    (:symlink
                     (let ((target (octets-to-string (read-blob repository (tree-entry-oid entry)))))
                       (buffer-write buffer (tar-header name 0 :mode #o777 :type #\2 :mtime mtime :link target))))
                    (t (let ((data (read-blob repository (tree-entry-oid entry))))
                         (buffer-write buffer (tar-header name (length data)
-                                                         :mode (if (eq (tree-entry-kind entry) :executable) #o755 #o644)
+                                                         :mode (if (eq (tree-entry-kind entry) :executable) executable-mode file-mode)
                                                          :mtime mtime))
                         (buffer-write buffer data)
                         (tar-pad buffer (length data))))))))
