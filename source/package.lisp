@@ -21,7 +21,7 @@
   (:export
    ;; octets
    #:octets #:make-octets #:octets-to-string #:string-to-octets #:octets-concat
-   #:hex #:unhex #:sha1-hex #:sha1-octets #:oid? #:read-file-octets #:write-file-octets
+   #:hex #:unhex #:sha1-hex #:sha1-octets #:oid? #:read-file-octets #:write-file-octets #:ensure-directory
    ;; zlib
    #:inflate #:inflate-at #:deflate #:gzip
    ;; pkt-line

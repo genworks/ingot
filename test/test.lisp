@@ -58,6 +58,16 @@
            (and (ingot:repository-exists? (merge-pathnames "one.git/" root))
                 (string= (ingot:default-branch repo) "master")
                 (null (ingot:head-oid repo))))
+         (ingot-check "sixteen threads making one new directory tree at once all succeed"
+           (let* ((dir (merge-pathnames "race/a/b/c/" root))
+                  (errors nil) (lock (bt:make-lock))
+                  (threads (loop repeat 16
+                                 collect (bt:make-thread
+                                          (lambda ()
+                                            (handler-case (ingot:ensure-directory dir)
+                                              (error (e) (bt:with-lock-held (lock) (push e errors)))))))))
+             (mapc #'bt:join-thread threads)
+             (and (null errors) (uiop:directory-exists-p dir) t)))
          (ingot-check "a first commit from actions"
            (setq c1 (ingot:make-commit! repo :branch "master" :author who :message "First"
                                             :actions '((:action :create :path "README.md" :content "# Hello

@@ -134,10 +134,27 @@ Lisps, only a type."
         (make-pathname :name (format nil "~a-~a" (pathname-name file) stamp) :type (pathname-type file) :defaults file)
         (make-pathname :name nil :type (format nil "~a-~a" (pathname-type file) stamp) :defaults file))))
 
+(defun ensure-directory (pathname)
+  "The directory of PATHNAME (its own directory when it names a file)
+made, missing parents included; answers it.  Two threads making the
+same tree at once both succeed: ensure-directories-exist probes and
+then creates, and the loser of that race is told that a parent it was
+about to make exists already (on Clozure CL as 'exists and is not a
+directory') while the winner may not have made the rest yet -- so the
+loser tries again, and a failure is believed only once the directory
+is still missing after several tries."
+  (let ((directory (make-pathname :name nil :type nil :version nil :defaults pathname)))
+    (loop for attempt from 1
+          do (handler-case (progn (ensure-directories-exist directory) (return directory))
+               (error (condition)
+                 (cond ((uiop:directory-exists-p directory) (return directory))
+                       ((>= attempt 10) (error condition))
+                       (t (sleep 0.01))))))))
+
 (defun write-file-octets (file octets &key (if-exists :supersede))
   "Write OCTETS to FILE whole: to a temporary file beside it, then a
 rename, so that a reader never sees half a file."
-  (ensure-directories-exist file)
+  (ensure-directory file)
   (let ((temporary (temporary-beside file)))
     (with-open-file (out temporary :direction :output :element-type '(unsigned-byte 8)
                                    :if-exists :supersede)

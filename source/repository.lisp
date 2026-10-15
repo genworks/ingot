@@ -67,7 +67,7 @@ exist) and answer it."
   (let ((dir (uiop:ensure-directory-pathname path)))
     (when (gitdir-of dir) (git-error "~a is a repository already." path))
     (dolist (sub '("objects/info/" "objects/pack/" "refs/heads/" "refs/tags/" "hooks/" "info/"))
-      (ensure-directories-exist (merge-pathnames sub dir)))
+      (ensure-directory (merge-pathnames sub dir)))
     (write-file-octets (merge-pathnames "HEAD" dir)
                        (string-to-octets (format nil "ref: refs/heads/~a~%" default-branch)))
     (write-file-octets (merge-pathnames "config" dir)

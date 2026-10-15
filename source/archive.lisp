@@ -159,10 +159,9 @@ Entries that would leave the directory are refused."
         (when (or (search ".." name) (and (plusp (length name)) (char= (char name 0) #\/)))
           (git-error "~a would leave the directory." name))
         (cond ((char= (getf entry :type) #\5)
-               (ensure-directories-exist (merge-pathnames (uiop:ensure-directory-pathname name) root)))
+               (ensure-directory (merge-pathnames (uiop:ensure-directory-pathname name) root)))
               ((getf entry :data)
                (let ((file (merge-pathnames name root)))
-                 (ensure-directories-exist file)
                  (write-file-octets file (getf entry :data)))))))
     root))
 
