@@ -25,13 +25,14 @@ in OLD-LINES, or nil where the line is new."
         (:insert (incf j))))))
 
 (defun file-lines-at (repository commit path)
-  "The lines of PATH in the commit structure COMMIT, or nil when it is
-not a text file there."
+  "The lines of PATH in the commit structure COMMIT, each keeping its
+newline (a last line without one differs from the same line with one,
+as it does for git), or nil when it is not a text file there."
   (let ((entry (tree-entry-at repository (commit-tree commit) path)))
     (and entry (member (tree-entry-kind entry) '(:blob :executable :symlink))
          (let ((octets (read-blob repository (tree-entry-oid entry))))
            (and (not (binary-octets? octets))
-                (split-lines (octets-to-string octets)))))))
+                (lines-keeping-ends (octets-to-string octets)))))))
 
 (defun blame (repository commit-oid path &key (limit 5000))
   "The lines of PATH at COMMIT-OID, each with the id of the commit that
@@ -88,4 +89,7 @@ than that are given to the oldest commit reached."
                          (maphash (lambda (final at) (declare (ignore at)) (setf (aref owner final) (commit-oid commit))) pending)))))
         (loop for line in lines
               for i from 0
-              collect (cons (or (aref owner i) (commit-oid start)) line))))))
+              collect (cons (or (aref owner i) (commit-oid start))
+                            (if (and (plusp (length line)) (char= (char line (1- (length line))) #\Newline))
+                                (subseq line 0 (1- (length line)))
+                                line)))))))
