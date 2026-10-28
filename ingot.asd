@@ -7,7 +7,7 @@
 (asdf:defsystem #:ingot
   :description "Git in Common Lisp: objects, packs, refs, trees, commits, diffs, merges, the smart protocol's server side, archives.  No subprocess, no git binary."
   :author "Genworks International"
-  :license "AGPL-3.0-or-later"
+  :license "MIT"
   :version "0.1.0"
   :serial t
   :depends-on (:chipz :salza2 :babel :bordeaux-threads)

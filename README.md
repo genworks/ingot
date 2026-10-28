@@ -134,4 +134,6 @@ questions, and compares.
 
 ## License
 
-GNU Affero General Public License, version 3 or later.
+MIT; see `LICENSE`.  Ingot began under the AGPL and moved to the MIT
+License on 2026-10-28, so that forges under permissive licenses (Cave is
+MIT) can take it as a dependency without a second license in the build.
