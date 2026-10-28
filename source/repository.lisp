@@ -357,14 +357,17 @@ their first parent.  Answers a list of commit structures."
         (out nil) (skipped 0))
     (setf (gethash (commit-oid (first frontier)) seen) t)
     (loop while (and frontier (< (length out) limit))
-          do (setq frontier (sort frontier #'> :key #'commit-committer-time))
+          ;; a stable sort over a queue the parents join at the back: the
+          ;; commits of one second come out as git prints them, the first
+          ;; parent's line first
+          do (setq frontier (stable-sort frontier #'> :key #'commit-committer-time))
              (let* ((commit (pop frontier))
                     (time (commit-committer-time commit)))
                (dolist (parent (commit-parents commit))
                  (unless (gethash parent seen)
                    (setf (gethash parent seen) t)
                    (let ((object (ignore-errors (read-commit repository parent))))
-                     (when object (push object frontier)))))
+                     (when object (setq frontier (append frontier (list object)))))))
                (when (and (or (null since) (>= time since))
                           (or (null until) (<= time until))
                           (or (null path) (commit-changes-path? repository commit path)))
