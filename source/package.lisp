@@ -46,6 +46,7 @@
    #:make-buffer #:buffer-write #:buffer-octets #:buffer-byte #:as-octets #:suboctets #:ascii #:be32
    #:tree-entry-at #:tree-at-path #:walk-tree #:tree-paths #:blob-at
    #:log-commits #:merge-base #:ancestor? #:reachable-objects #:count-commits
+   #:commits-between #:nearest-tag #:tree-entry-tree?
    #:repository-lock #:with-repository-lock
    ;; writing
    #:apply-actions #:make-commit!
@@ -60,5 +61,11 @@
    #:parse-advertisement #:fetch-request #:parse-fetch-response #:fetch! #:*fetch-capabilities*
    ;; archive
    #:tar-tree #:tar-gz-tree #:zip-tree #:tar-entries #:tar-append-entry #:tar-find #:untar
+   ;; message
+   #:commit-subject-and-body #:commit-trailers #:commit-signature #:ident-date-string
+   ;; patch
+   #:change-patch #:patch-text #:commit-patch #:stat-text #:format-patch
+   ;; blame
+   #:blame
    ;; conditions
    #:git-error #:not-found #:ref-conflict))

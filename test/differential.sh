@@ -42,4 +42,4 @@ docker run --rm \
   -v "$here":/ingot:ro \
   -v "$facts":/facts:ro \
   "$image" \
-  sh -c 'cd /opt/gendl && ./gdl/program/gdl-$(case "$0" in *ccl*) echo ccl;; *) echo sbcl;; esac) -n -b --load /ingot/test/differential.lisp' "$image"
+  sh -c 'cd /opt/gendl && case "$0" in *ccl*) ./gdl/program/gdl-ccl -n -b --load /ingot/test/differential.lisp;; *) ./gdl/program/gdl-sbcl --non-interactive --load /ingot/test/differential.lisp;; esac' "$image"

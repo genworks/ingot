@@ -5,7 +5,7 @@
 ;;; here, in load order.
 
 (asdf:defsystem #:ingot
-  :description "Git in Common Lisp: objects, packs, refs, trees, commits, diffs, merges, the smart protocol's server side, archives.  No subprocess, no git binary."
+  :description "Git in Common Lisp: objects, packs, refs, trees, commits, diffs, patches, blame, merges, the smart protocol's server side, archives.  No subprocess, no git binary."
   :author "Genworks International"
   :license "MIT"
   :version "0.1.0"
@@ -26,4 +26,7 @@
                (:file "source/merge")
                (:file "source/packwriter")
                (:file "source/protocol")
-               (:file "source/archive")))
+               (:file "source/archive")
+               (:file "source/message")
+               (:file "source/patch")
+               (:file "source/blame")))

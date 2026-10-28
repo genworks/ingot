@@ -429,6 +429,55 @@ first commit reachable from B, newest first, that A also reaches."
                    (let ((object (ignore-errors (read-commit repository parent))))
                      (when object (push object frontier)))))))))
 
+(defun commits-between (repository from to &key (limit 1000))
+  "The commits reachable from TO and not from FROM (both commit ids; FROM
+nil for all of TO's history), newest first, LIMIT of them at most: the
+commits a branch holds that another lacks."
+  (let ((excluded (if from (ancestors repository from) (make-hash-table :test #'equal)))
+        (seen (make-hash-table :test #'equal))
+        (frontier (list (read-commit repository to)))
+        (out nil))
+    (setf (gethash to seen) t)
+    (loop while (and frontier (< (length out) limit))
+          do (setq frontier (stable-sort frontier #'> :key #'commit-committer-time))
+             (let ((commit (pop frontier)))
+               (unless (gethash (commit-oid commit) excluded)
+                 (push commit out)
+                 (dolist (parent (commit-parents commit))
+                   (unless (or (gethash parent seen) (gethash parent excluded))
+                     (setf (gethash parent seen) t)
+                     (let ((object (ignore-errors (read-commit repository parent))))
+                       (when object (setq frontier (append frontier (list object))))))))))
+    (nreverse out)))
+
+(defun nearest-tag (repository commit-oid)
+  "The tag `git describe --tags --abbrev=0` would name for COMMIT-OID: the
+closest tag reachable from it, the commit itself included; among tags at
+one distance, the newest.  Nil when none is reachable."
+  (let ((tags-at (make-hash-table :test #'equal)))
+    (loop for (name . oid) in (tags repository)
+          do (let ((commit (peel-to-commit repository oid)))
+               (when commit (push (cons name oid) (gethash commit tags-at)))))
+    (when (plusp (hash-table-count tags-at))
+      (flet ((made (oid)
+               (let ((object (find-object repository oid)))
+                 (if (and object (eq (object-type object) :tag))
+                     (let ((tagger (tag-tagger (parse-tag (object-data object) oid)))) (if tagger (ident-time tagger) 0))
+                     (commit-committer-time (read-commit repository oid))))))
+        (let ((seen (make-hash-table :test #'equal))
+              (frontier (list commit-oid)))
+          (setf (gethash commit-oid seen) t)
+          (loop while frontier
+                do (let ((found (loop for c in frontier append (gethash c tags-at))))
+                     (when found
+                       (return (car (first (sort found #'> :key (lambda (tag) (made (cdr tag)))))))))
+                   (setq frontier
+                         (loop for c in frontier
+                               append (loop for parent in (commit-parents (read-commit repository c))
+                                            unless (gethash parent seen)
+                                              do (setf (gethash parent seen) t)
+                                              and collect parent)))))))))
+
 (defun reachable-objects (repository wants haves)
   "The ids of the objects reachable from the commits WANTS that are not
 reachable from the commits HAVES: what a fetch has to send.  Answers a

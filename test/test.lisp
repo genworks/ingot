@@ -450,6 +450,101 @@ C
                            (multiple-value-bind (set3 deleted3) (ingot:fetch! third transport)
                              (and (equal deleted3 '("refs/heads/dots"))
                                   (equal set3 (list (cons "refs/heads/ff" c1))))))))))
+         (ingot-check "the subject and the body as %s and %b, and the trailers"
+           (let* ((oid (ingot:make-commit! repo :branch "words" :start-branch "master" :author who
+                                                :message "Title line
+continued
+
+Body paragraph.
+
+Signed-off-by: A Person <a@example.org>
+Co-Authored-By: B Person <b@example.org>
+"
+                                                :actions '((:action :create :path "words.txt" :content "w
+"))))
+                  (commit (ingot:read-commit repo oid)))
+             (multiple-value-bind (subject body) (ingot:commit-subject-and-body commit)
+               (and (string= subject "Title line continued")
+                    (string= body "Body paragraph.
+
+Signed-off-by: A Person <a@example.org>
+Co-Authored-By: B Person <b@example.org>")
+                    (equal (ingot:commit-trailers commit)
+                           '(("Signed-off-by" . "A Person <a@example.org>") ("Co-Authored-By" . "B Person <b@example.org>")))
+                    (null (ingot:commit-trailers (ingot:read-commit repo c1)))
+                    (null (ingot:commit-signature repo oid))))))
+         (ingot-check "a commit's patch: the index line, the no-newline marker, a binary; format-patch's shape"
+           (let* ((a (ingot:make-commit! repo :branch "words" :author who :message "No newline"
+                                              :actions '((:action :create :path "nonl.txt" :content "a
+b"))))
+                  (b (ingot:make-commit! repo :branch "words" :author who :message "Newline, and a binary"
+                                              :actions (list '(:action :update :path "nonl.txt" :content "a
+b
+")
+                                                             (list :action :create :path "x.bin" :content (ingot:octets 0 1 2 3)))))
+                  (patch-a (ingot:commit-patch repo a))
+                  (patch-b (ingot:commit-patch repo b))
+                  (stat-b (ingot:stat-text repo (ingot:commit-diff repo b)))
+                  (mail (ingot:format-patch repo b)))
+             (and (search (format nil "diff --git a/nonl.txt b/nonl.txt~%new file mode 100644~%index 0000000..") patch-a)
+                  (search (format nil "+b~%\\ No newline at end of file~%") patch-a)
+                  (search (format nil "-b~%\\ No newline at end of file~%+b~%") patch-b)
+                  (search "Binary files /dev/null and b/x.bin differ" patch-b)
+                  (search " x.bin    | Bin 0 -> 4 bytes" stat-b)
+                  (search " 2 files changed, 1 insertion(+), 1 deletion(-)" stat-b)
+                  (search (format nil "From ~a Mon Sep 17 00:00:00 2001~%From: Test Person <test@example.org>~%Date: " b) mail)
+                  (search (format nil "Subject: [PATCH] Newline, and a binary~%~%---~% nonl.txt") mail)
+                  (search " create mode 100644 x.bin" mail)
+                  (search (format nil "~%-- ~%ingot~%") mail)
+                  (string= (ingot:ident-date-string who) "2023-11-14 22:13:20 +0000"))))
+         (ingot-check "blame: each line to the commit that wrote it, across a merge"
+           ;; the two sides change lines apart from each other, as a merge needs
+           (let* ((a (ingot:make-commit! repo :branch "blame" :start-branch "master" :author who :message "A"
+                                              :actions '((:action :create :path "poem.txt" :content "one
+two
+three
+four
+five
+six
+"))))
+                  (s (ingot:make-commit! repo :branch "blame-side" :start-branch "blame" :author who :message "S"
+                                              :actions '((:action :update :path "poem.txt" :content "one
+two
+three
+four
+FIVE
+six
+"))))
+                  (b (ingot:make-commit! repo :branch "blame" :author who :message "B"
+                                              :actions '((:action :update :path "poem.txt" :content "one
+TWO
+three
+four
+five
+six
+"))))
+                  (c (ingot:make-commit! repo :branch "blame" :author who :message "C"
+                                              :actions '((:action :update :path "poem.txt" :content "one
+TWO
+three
+four
+five
+six
+seven
+"))))
+                  (m (ingot:merge-branches! repo "blame-side" "blame" :author who :message "M"))
+                  (before (ingot:blame repo c "poem.txt"))
+                  (after (ingot:blame repo m "poem.txt")))
+             (and (equal before (list (cons a "one") (cons b "TWO") (cons a "three") (cons a "four") (cons a "five") (cons a "six") (cons c "seven")))
+                  (equal after (list (cons a "one") (cons b "TWO") (cons a "three") (cons a "four") (cons s "FIVE") (cons a "six") (cons c "seven")))
+                  (null (ingot:blame repo m "nowhere.txt"))
+                  ;; the commits a branch has that master lacks, newest first; and the tag nearest to it
+                  (let ((between (ingot:commits-between repo c2 m)))
+                    (and (= (length between) 5)
+                         (string= (ingot:commit-oid (first between)) m)
+                         (not (member c2 between :key #'ingot:commit-oid :test #'string=))
+                         (= (length (ingot:commits-between repo nil a)) (1+ (ingot:count-commits repo c2)))
+                         (string= (ingot:nearest-tag repo m) "v1"))))))
          ;; an existing repository, when one is named
          (let ((existing (uiop:getenv "INGOT_REPO")))
            (when (and existing (plusp (length existing)))

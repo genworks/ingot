@@ -4,7 +4,8 @@ Git in Common Lisp.  Ingot reads and writes Git repositories that are
 byte-for-byte the ones C Git makes, with no `git` binary and no
 subprocess: loose and packed objects (packfile deltas included), refs
 and `packed-refs`, trees and commits and tags, history walks and merge
-bases, tree and line diffs, three-way merges, the smart protocol's
+bases, tree and line diffs, the patches git prints (format-patch and
+--stat included), blame, trailers, three-way merges, the smart protocol's
 server side (`upload-pack` and `receive-pack` over stateless HTTP) with
 the pack a fetch answers with, the client side of a fetch over a
 transport the caller lends, and archives of a tree.  It is the Git
@@ -98,6 +99,10 @@ with the `commit-` readers.
 | `git update-ref`, `git branch -D` | `(update-ref! *repo* "refs/heads/x" oid :old old)`, `(delete-ref! *repo* "refs/heads/x")` |
 | `git symbolic-ref HEAD refs/heads/main` | `(set-default-branch! *repo* "main")` |
 | `git archive --format=tar.gz --prefix=p/ <tree>` | `(tar-gz-tree *repo* tree-oid :prefix "p/")`, `(zip-tree ...)` |
+| `git show <commit>` as text, `git format-patch -1 <commit>` | `(commit-patch *repo* oid)`, `(format-patch *repo* oid)`; `(patch-text *repo* changes)` for any changes, `(stat-text *repo* changes)` for `--stat` |
+| `git blame <ref> -- file` | `(blame *repo* oid "file")`: a list of (commit-id . line) |
+| `git log a..b`, `git describe --tags --abbrev=0` | `(commits-between *repo* a b)`, `(nearest-tag *repo* oid)` |
+| `git log --format=%s%n%b`, `git interpret-trailers --parse` | `(commit-subject-and-body commit)`, `(commit-trailers commit)`; `(commit-signature *repo* oid)` says whether it is signed |
 | `git fetch`, `git clone` | `(fetch! *repo* transport)` |
 | `git push` | `write-pack` of `(reachable-objects *repo* wants haves)` behind the receive-pack commands; Anvil's mirror push is the worked example |
 | serving `git-upload-pack`, `git-receive-pack` | `(advertise-refs *repo* :upload-pack)`, `(upload-pack *repo* body)`, `(receive-pack *repo* body :check ...)` |
